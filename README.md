@@ -1,36 +1,74 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Siam Bean Co. - Mini ERP
 
-## Getting Started
+Mini ERP system integrating Sales, Warehouse, and Accounting workflows on a shared PostgreSQL database.
 
-First, run the development server:
+## System Architecture & Live Demo
+- **Frontend & Fullstack**: Next.js (App Router), Tailwind CSS
+- **Database & Auth**: Supabase (PostgreSQL)
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Relational Database Schema (ER Diagram)
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+\`\`\`mermaid
+erDiagram
+    PROFILES {
+        uuid id PK
+        string email
+        string role
+    }
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+    PRODUCTS {
+        int id PK
+        string sku UK
+        string name
+        numeric price
+        int stock_qty
+        int min_stock_alert
+        boolean is_active
+    }
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+    CUSTOMERS {
+        int id PK
+        string name
+        string tax_id
+        string address
+        boolean is_active
+    }
 
-## Learn More
+    ORDERS {
+        int id PK
+        int customer_id FK
+        string status
+        numeric subtotal
+        numeric vat_amount
+        numeric grand_total
+        timestamptz created_at
+    }
 
-To learn more about Next.js, take a look at the following resources:
+    ORDER_ITEMS {
+        int id PK
+        int order_id FK
+        int product_id FK
+        int quantity
+        numeric unit_price
+    }
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+    INVOICES {
+        int id PK
+        int order_id FK
+        string invoice_no UK
+        string status
+        numeric grand_total
+        timestamptz created_at
+    }
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+    CUSTOMERS ||--o{ ORDERS : places
+    ORDERS ||--|{ ORDER_ITEMS : contains
+    PRODUCTS ||--o{ ORDER_ITEMS : includes
+    ORDERS ||--|| INVOICES : generates
+\`\`\`
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Business Logic Rules
+1. **Sales Order (US-1)**: Confirming an order checks stock. If sufficient, updates stock, creates order, and generates `INV-000x` with 7% VAT.
+2. **Stock Management (US-2)**: Real-time stock decrement upon order confirmation; stock-in mechanism; low-stock badges.
+3. **Role Authorization (US-3)**: Role-based permissions preventing unauthorized actions (e.g., Warehouse receiving 403 when trying to issue invoices).
+4. **Payments (US-4)**: Recording payment updates invoice status to `Paid` and updates total sales figures.
