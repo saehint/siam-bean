@@ -21,6 +21,14 @@ export default function MiniERP() {
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [customerForm, setCustomerForm] = useState({ id: null, name: '', tax_id: '', address: '' });
 
+  // จุดที่ 1: State สำหรับสร้างออเดอร์เองสดๆ
+  const [showOrderModal, setShowOrderModal] = useState(false);
+  const [orderForm, setOrderForm] = useState({
+    customerId: '',
+    productId: '',
+    quantity: 10,
+  });
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -46,14 +54,14 @@ export default function MiniERP() {
     }
   };
 
-  // US-1 & US-3: Place Order via API Route (Real 403 Check)
+  // US-1: ปุ่มลัดตามโจทย์เดิม (Café Lune 20 kg)
   const handleConfirmOrder = async () => {
     setErrorBanner(null);
     const targetProduct = products.find((p) => p.sku === 'ARB-1KG');
     const targetCustomer = customers[0];
 
     if (!targetProduct || !targetCustomer) {
-      setErrorBanner('Product or Customer not found. Please create them first.');
+      setErrorBanner('ไม่พบข้อมูลสินค้า ARB-1KG หรือลูกค้า');
       return;
     }
 
@@ -74,6 +82,37 @@ export default function MiniERP() {
       return;
     }
 
+    fetchData();
+  };
+
+  // จุดที่ 2: ฟังก์ชันสำหรับยิง API เมื่อกรรมการสั่งให้ออกออเดอร์เอง
+  const handleCustomOrderSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorBanner(null);
+
+    if (!orderForm.customerId || !orderForm.productId) {
+      setErrorBanner('กรุณาเลือกลูกค้าและสินค้าให้ครบถ้วน');
+      return;
+    }
+
+    const res = await fetch('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        role,
+        customer_id: parseInt(orderForm.customerId),
+        product_id: parseInt(orderForm.productId),
+        quantity: Number(orderForm.quantity),
+      }),
+    });
+
+    const result = await res.json();
+    if (!res.ok) {
+      setErrorBanner(`[HTTP ${res.status}] ${result.error}`);
+      return;
+    }
+
+    setShowOrderModal(false);
     fetchData();
   };
 
@@ -199,20 +238,37 @@ export default function MiniERP() {
           </div>
         </div>
 
-        {/* US-1: Quick Order Section */}
+        {/* จุดที่ 3: ส่วนการสั่งซื้อ มีทั้งปุ่ม Demo ตามโจทย์ และปุ่ม + สร้างออเดอร์เองสดๆ */}
         <div className="bg-blue-50 border border-blue-200 p-6 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4">
           <div>
-            <h3 className="font-bold text-blue-900 text-base">🛒 เคสทดสอบตามโจทย์: Café Lune สั่งซื้อ 20 kg (ARB-1KG)</h3>
+            <h3 className="font-bold text-blue-900 text-base">🛒 ระบบออกคำสั่งซื้อ (Sales Orders)</h3>
             <p className="text-xs text-blue-700 mt-1">
-              ราคา 450 THB/kg × 20 kg = 9,000 THB + VAT 7% (630 THB) = รวม <strong>9,630 THB</strong>
+              เคสตามโจทย์: Café Lune สั่งซื้อ 20 kg (ARB-1KG) = 9,630 THB (รวม VAT 7%) หรือคลิกสร้างรายการเอง
             </p>
           </div>
-          <button
-            onClick={handleConfirmOrder}
-            className="w-full md:w-auto px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-lg shadow transition"
-          >
-            ยืนยันคำสั่งซื้อ (Confirm Order)
-          </button>
+          <div className="flex flex-wrap gap-2 w-full md:w-auto">
+            <button
+              onClick={() => {
+                if (customers.length > 0 && products.length > 0) {
+                  setOrderForm({
+                    customerId: String(customers[0].id),
+                    productId: String(products[0].id),
+                    quantity: 10,
+                  });
+                }
+                setShowOrderModal(true);
+              }}
+              className="px-4 py-2.5 bg-white hover:bg-slate-100 text-blue-700 font-semibold text-sm rounded-lg border border-blue-300 shadow-sm transition"
+            >
+              + สร้างออเดอร์เอง
+            </button>
+            <button
+              onClick={handleConfirmOrder}
+              className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-lg shadow transition"
+            >
+              ยืนยันตามโจทย์ด่วน (20 kg)
+            </button>
+          </div>
         </div>
 
         {/* Products Section */}
@@ -386,14 +442,81 @@ export default function MiniERP() {
         </section>
       </div>
 
-      {/* MODAL 1: Stock-in Form */}
+      {/* จุดที่ 4: MODAL สำหรับเลือกสร้างออเดอร์เองสดๆ */}
+      {showOrderModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <form onSubmit={handleCustomOrderSubmit} className="bg-white p-6 rounded-xl max-w-md w-full space-y-4 shadow-xl">
+            <h3 className="font-bold text-base text-slate-800">สร้างใบสั่งซื้อใหม่ (Create Custom Order)</h3>
+            
+            <div>
+              <label className="text-xs font-semibold block mb-1 text-slate-700">เลือกลูกค้า:</label>
+              <select
+                value={orderForm.customerId}
+                onChange={(e) => setOrderForm({ ...orderForm, customerId: e.target.value })}
+                className="w-full border rounded-lg p-2 text-sm bg-white"
+                required
+              >
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold block mb-1 text-slate-700">เลือกสินค้า:</label>
+              <select
+                value={orderForm.productId}
+                onChange={(e) => setOrderForm({ ...orderForm, productId: e.target.value })}
+                className="w-full border rounded-lg p-2 text-sm bg-white"
+                required
+              >
+                {products.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} (คงเหลือ: {p.stock_qty} kg, ราคา: {p.price} THB)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold block mb-1 text-slate-700">จำนวนสั่งซื้อ (kg):</label>
+              <input
+                type="number"
+                min="1"
+                required
+                value={orderForm.quantity}
+                onChange={(e) => setOrderForm({ ...orderForm, quantity: parseInt(e.target.value) || 1 })}
+                className="w-full border rounded-lg p-2 text-sm"
+              />
+            </div>
+
+            <div className="flex justify-end space-x-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowOrderModal(false)}
+                className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-sm"
+              >
+                ออกใบสั่งซื้อและตัดสต็อก
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* MODAL: Stock-in Form */}
       {showStockModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <form onSubmit={handleStockInSubmit} className="bg-white p-6 rounded-xl max-w-sm w-full space-y-4">
-            <h3 className="font-bold text-base">เติมสต็อกสินค้า (Stock-in Form)</h3>
+          <form onSubmit={handleStockInSubmit} className="bg-white p-6 rounded-xl max-w-sm w-full space-y-4 shadow-xl">
+            <h3 className="font-bold text-base text-slate-800">เติมสต็อกสินค้า (Stock-in Form)</h3>
             <p className="text-xs text-slate-500">สินค้า: {showStockModal.name} ({showStockModal.sku})</p>
             <div>
-              <label className="text-xs font-semibold block mb-1">จำนวนที่ต้องการนำเข้า (kg):</label>
+              <label className="text-xs font-semibold block mb-1 text-slate-700">จำนวนที่ต้องการนำเข้า (kg):</label>
               <input
                 type="number"
                 min="1"
@@ -405,63 +528,63 @@ export default function MiniERP() {
             </div>
             <div className="flex justify-end space-x-2">
               <button type="button" onClick={() => setShowStockModal(null)} className="px-3 py-1.5 text-xs text-slate-600">ยกเลิก</button>
-              <button type="submit" className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded-lg font-semibold">ยืนยันการเติมสต็อก</button>
+              <button type="submit" className="px-4 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold shadow-sm">ยืนยันการเติมสต็อก</button>
             </div>
           </form>
         </div>
       )}
 
-      {/* MODAL 2: Product Form (Create / Edit) */}
+      {/* MODAL: Product Form */}
       {showProductModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <form onSubmit={handleSaveProduct} className="bg-white p-6 rounded-xl max-w-md w-full space-y-3">
-            <h3 className="font-bold text-base">{productForm.id ? 'แก้ไขสินค้า' : 'สร้างสินค้าใหม่'}</h3>
+          <form onSubmit={handleSaveProduct} className="bg-white p-6 rounded-xl max-w-md w-full space-y-3 shadow-xl">
+            <h3 className="font-bold text-base text-slate-800">{productForm.id ? 'แก้ไขสินค้า' : 'สร้างสินค้าใหม่'}</h3>
             <div>
-              <label className="text-xs font-semibold block mb-1">SKU:</label>
+              <label className="text-xs font-semibold block mb-1 text-slate-700">SKU:</label>
               <input required value={productForm.sku} onChange={(e) => setProductForm({ ...productForm, sku: e.target.value })} className="w-full border rounded-lg p-2 text-sm" />
             </div>
             <div>
-              <label className="text-xs font-semibold block mb-1">ชื่อสินค้า:</label>
+              <label className="text-xs font-semibold block mb-1 text-slate-700">ชื่อสินค้า:</label>
               <input required value={productForm.name} onChange={(e) => setProductForm({ ...productForm, name: e.target.value })} className="w-full border rounded-lg p-2 text-sm" />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="text-xs font-semibold block mb-1">ราคา (THB):</label>
+                <label className="text-xs font-semibold block mb-1 text-slate-700">ราคา (THB):</label>
                 <input type="number" step="0.01" required value={productForm.price} onChange={(e) => setProductForm({ ...productForm, price: e.target.value })} className="w-full border rounded-lg p-2 text-sm" />
               </div>
               <div>
-                <label className="text-xs font-semibold block mb-1">สต็อกคงเหลือ:</label>
+                <label className="text-xs font-semibold block mb-1 text-slate-700">สต็อกคงเหลือ:</label>
                 <input type="number" required value={productForm.stock_qty} onChange={(e) => setProductForm({ ...productForm, stock_qty: e.target.value })} className="w-full border rounded-lg p-2 text-sm" />
               </div>
             </div>
             <div className="flex justify-end space-x-2 pt-2">
               <button type="button" onClick={() => setShowProductModal(false)} className="px-3 py-1.5 text-xs text-slate-600">ยกเลิก</button>
-              <button type="submit" className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded-lg font-semibold">บันทึก</button>
+              <button type="submit" className="px-4 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-sm">บันทึก</button>
             </div>
           </form>
         </div>
       )}
 
-      {/* MODAL 3: Customer Form (Create / Edit) */}
+      {/* MODAL: Customer Form */}
       {showCustomerModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <form onSubmit={handleSaveCustomer} className="bg-white p-6 rounded-xl max-w-md w-full space-y-3">
-            <h3 className="font-bold text-base">{customerForm.id ? 'แก้ไขข้อมูลลูกค้า' : 'สร้างลูกค้าใหม่'}</h3>
+          <form onSubmit={handleSaveCustomer} className="bg-white p-6 rounded-xl max-w-md w-full space-y-3 shadow-xl">
+            <h3 className="font-bold text-base text-slate-800">{customerForm.id ? 'แก้ไขข้อมูลลูกค้า' : 'สร้างลูกค้าใหม่'}</h3>
             <div>
-              <label className="text-xs font-semibold block mb-1">ชื่อลูกค้า / บริษัท:</label>
+              <label className="text-xs font-semibold block mb-1 text-slate-700">ชื่อลูกค้า / บริษัท:</label>
               <input required value={customerForm.name} onChange={(e) => setCustomerForm({ ...customerForm, name: e.target.value })} className="w-full border rounded-lg p-2 text-sm" />
             </div>
             <div>
-              <label className="text-xs font-semibold block mb-1">เลขประจำตัวผู้เสียภาษี (Tax ID):</label>
+              <label className="text-xs font-semibold block mb-1 text-slate-700">เลขประจำตัวผู้เสียภาษี (Tax ID):</label>
               <input required value={customerForm.tax_id} onChange={(e) => setCustomerForm({ ...customerForm, tax_id: e.target.value })} className="w-full border rounded-lg p-2 text-sm" />
             </div>
             <div>
-              <label className="text-xs font-semibold block mb-1">ที่อยู่:</label>
+              <label className="text-xs font-semibold block mb-1 text-slate-700">ที่อยู่:</label>
               <textarea value={customerForm.address} onChange={(e) => setCustomerForm({ ...customerForm, address: e.target.value })} className="w-full border rounded-lg p-2 text-sm" rows={2} />
             </div>
             <div className="flex justify-end space-x-2 pt-2">
               <button type="button" onClick={() => setShowCustomerModal(false)} className="px-3 py-1.5 text-xs text-slate-600">ยกเลิก</button>
-              <button type="submit" className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded-lg font-semibold">บันทึก</button>
+              <button type="submit" className="px-4 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-sm">บันทึก</button>
             </div>
           </form>
         </div>
