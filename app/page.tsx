@@ -21,7 +21,6 @@ export default function MiniERP() {
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [customerForm, setCustomerForm] = useState({ id: null, name: '', tax_id: '', address: '' });
 
-  // จุดที่ 1: State สำหรับสร้างออเดอร์เองสดๆ
   const [showOrderModal, setShowOrderModal] = useState(false);
   const [orderForm, setOrderForm] = useState({
     customerId: '',
@@ -54,9 +53,14 @@ export default function MiniERP() {
     }
   };
 
-  // US-1: ปุ่มลัดตามโจทย์เดิม (Café Lune 20 kg)
+  // US-1 & US-3: Check Sales/Admin
   const handleConfirmOrder = async () => {
     setErrorBanner(null);
+    if (role !== 'Sales' && role !== 'Admin') {
+      setErrorBanner(`[HTTP 403 Forbidden] สิทธิ์ของคุณ (${role}) ไม่สามารถสร้างคำสั่งซื้อได้ (ต้องเป็น Sales หรือ Admin)`);
+      return;
+    }
+
     const targetProduct = products.find((p) => p.sku === 'ARB-1KG');
     const targetCustomer = customers[0];
 
@@ -85,10 +89,14 @@ export default function MiniERP() {
     fetchData();
   };
 
-  // จุดที่ 2: ฟังก์ชันสำหรับยิง API เมื่อกรรมการสั่งให้ออกออเดอร์เอง
   const handleCustomOrderSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorBanner(null);
+
+    if (role !== 'Sales' && role !== 'Admin') {
+      setErrorBanner(`[HTTP 403 Forbidden] สิทธิ์ของคุณ (${role}) ไม่สามารถสร้างคำสั่งซื้อได้`);
+      return;
+    }
 
     if (!orderForm.customerId || !orderForm.productId) {
       setErrorBanner('กรุณาเลือกลูกค้าและสินค้าให้ครบถ้วน');
@@ -116,9 +124,20 @@ export default function MiniERP() {
     fetchData();
   };
 
+  // Warehouse RBAC: เฉพาะ Warehouse และ Admin เท่านั้นที่ยุ่งกับสต็อก/สินค้าได้
+  const canManageWarehouse = role === 'Warehouse' || role === 'Admin';
+
+  // Customer RBAC: เฉพาะ Sales และ Admin เท่านั้นที่เพิ่ม/แก้ไขลูกค้าได้
+  const canManageCustomer = role === 'Sales' || role === 'Admin';
+
   // US-2: Stock-In Form Handler
   const handleStockInSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canManageWarehouse) {
+      setErrorBanner(`[HTTP 403 Forbidden] สิทธิ์ของคุณ (${role}) ไม่สามารถจัดการสต็อกสินค้าได้`);
+      setShowStockModal(null);
+      return;
+    }
     if (!showStockModal) return;
     const newQty = showStockModal.stock_qty + Number(stockAddAmount);
     await supabase.from('products').update({ stock_qty: newQty }).eq('id', showStockModal.id);
@@ -126,19 +145,25 @@ export default function MiniERP() {
     fetchData();
   };
 
-  // US-4: Payments
+  // US-4: Payments (Accountant only)
   const handleMarkPaid = async (invId: number) => {
     if (role !== 'Accountant' && role !== 'Admin') {
-      setErrorBanner('[HTTP 403] Only Accountant or Admin can register payments.');
+      setErrorBanner(`[HTTP 403 Forbidden] สิทธิ์ของคุณ (${role}) ไม่สามารถบันทึกรับเงินได้ (ต้องเป็น Accountant หรือ Admin)`);
       return;
     }
     await supabase.from('invoices').update({ status: 'Paid' }).eq('id', invId);
     fetchData();
   };
 
-  // Product CRUD Handlers
+  // Product CRUD
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canManageWarehouse) {
+      setErrorBanner(`[HTTP 403 Forbidden] สิทธิ์ของคุณ (${role}) ไม่สามารถจัดการสินค้าได้`);
+      setShowProductModal(false);
+      return;
+    }
+
     const payload = {
       sku: productForm.sku,
       name: productForm.name,
@@ -157,13 +182,23 @@ export default function MiniERP() {
   };
 
   const handleToggleProduct = async (p: any) => {
+    if (!canManageWarehouse) {
+      setErrorBanner(`[HTTP 403 Forbidden] สิทธิ์ของคุณ (${role}) ไม่สามารถเปลี่ยนสถานะสินค้าได้`);
+      return;
+    }
     await supabase.from('products').update({ is_active: !(p.is_active !== false) }).eq('id', p.id);
     fetchData();
   };
 
-  // Customer CRUD Handlers
+  // Customer CRUD
   const handleSaveCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canManageCustomer) {
+      setErrorBanner(`[HTTP 403 Forbidden] สิทธิ์ของคุณ (${role}) ไม่สามารถจัดการข้อมูลลูกค้าได้ (ต้องเป็น Sales หรือ Admin)`);
+      setShowCustomerModal(false);
+      return;
+    }
+
     const payload = {
       name: customerForm.name,
       tax_id: customerForm.tax_id,
@@ -180,6 +215,10 @@ export default function MiniERP() {
   };
 
   const handleToggleCustomer = async (c: any) => {
+    if (!canManageCustomer) {
+      setErrorBanner(`[HTTP 403 Forbidden] สิทธิ์ของคุณ (${role}) ไม่สามารถจัดการลูกค้าได้`);
+      return;
+    }
     await supabase.from('customers').update({ is_active: !(c.is_active !== false) }).eq('id', c.id);
     fetchData();
   };
@@ -238,17 +277,21 @@ export default function MiniERP() {
           </div>
         </div>
 
-        {/* จุดที่ 3: ส่วนการสั่งซื้อ มีทั้งปุ่ม Demo ตามโจทย์ และปุ่ม + สร้างออเดอร์เองสดๆ */}
+        {/* Sales Orders Section */}
         <div className="bg-blue-50 border border-blue-200 p-6 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4">
           <div>
             <h3 className="font-bold text-blue-900 text-base">🛒 ระบบออกคำสั่งซื้อ (Sales Orders)</h3>
             <p className="text-xs text-blue-700 mt-1">
-              เคสตามโจทย์: Café Lune สั่งซื้อ 20 kg (ARB-1KG) = 9,630 THB (รวม VAT 7%) หรือคลิกสร้างรายการเอง
+              เคสตามโจทย์: Café Lune สั่งซื้อ 20 kg (ARB-1KG) = 9,630 THB (รวม VAT 7%)
             </p>
           </div>
           <div className="flex flex-wrap gap-2 w-full md:w-auto">
             <button
               onClick={() => {
+                if (role !== 'Sales' && role !== 'Admin') {
+                  setErrorBanner(`[HTTP 403 Forbidden] สิทธิ์ของคุณ (${role}) ไม่สามารถสร้างคำสั่งซื้อได้`);
+                  return;
+                }
                 if (customers.length > 0 && products.length > 0) {
                   setOrderForm({
                     customerId: String(customers[0].id),
@@ -271,19 +314,26 @@ export default function MiniERP() {
           </div>
         </div>
 
-        {/* Products Section */}
+        {/* Products Section (Warehouse Only) */}
         <section className="bg-white rounded-xl shadow-sm border border-slate-100 p-6 space-y-4">
           <div className="flex justify-between items-center">
-            <h2 className="text-lg font-bold">📦 รายการสินค้าและสต็อก (Products)</h2>
-            <button
-              onClick={() => {
-                setProductForm({ id: null, sku: '', name: '', price: '', stock_qty: '', min_stock_alert: '20' });
-                setShowProductModal(true);
-              }}
-              className="text-xs bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg"
-            >
-              + เพิ่มสินค้า
-            </button>
+            <div>
+              <h2 className="text-lg font-bold">📦 รายการสินค้าและสต็อก (Products)</h2>
+              {!canManageWarehouse && (
+                <span className="text-xs text-slate-400">บทบาท {role} ดูข้อมูลได้อย่างเดียว (ห้ามแก้ไขคลัง)</span>
+              )}
+            </div>
+            {canManageWarehouse && (
+              <button
+                onClick={() => {
+                  setProductForm({ id: null, sku: '', name: '', price: '', stock_qty: '', min_stock_alert: '20' });
+                  setShowProductModal(true);
+                }}
+                className="text-xs bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg"
+              >
+                + เพิ่มสินค้า
+              </button>
+            )}
           </div>
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 text-slate-500 font-semibold border-b">
@@ -311,27 +361,33 @@ export default function MiniERP() {
                       )}
                     </td>
                     <td className="p-3 text-right space-x-2">
-                      <button
-                        onClick={() => { setShowStockModal(p); setStockAddAmount(50); }}
-                        className="text-xs bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 px-2 py-1 rounded"
-                      >
-                        + Stock-in Form
-                      </button>
-                      <button
-                        onClick={() => {
-                          setProductForm({ id: p.id, sku: p.sku, name: p.name, price: p.price, stock_qty: p.stock_qty, min_stock_alert: p.min_stock_alert });
-                          setShowProductModal(true);
-                        }}
-                        className="text-xs text-blue-600 hover:underline"
-                      >
-                        แก้ไข
-                      </button>
-                      <button
-                        onClick={() => handleToggleProduct(p)}
-                        className={`text-xs ${active ? 'text-red-500' : 'text-slate-600'} hover:underline`}
-                      >
-                        {active ? 'Deactivate' : 'Activate'}
-                      </button>
+                      {canManageWarehouse ? (
+                        <>
+                          <button
+                            onClick={() => { setShowStockModal(p); setStockAddAmount(50); }}
+                            className="text-xs bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 px-2 py-1 rounded"
+                          >
+                            + Stock-in Form
+                          </button>
+                          <button
+                            onClick={() => {
+                              setProductForm({ id: p.id, sku: p.sku, name: p.name, price: p.price, stock_qty: p.stock_qty, min_stock_alert: p.min_stock_alert });
+                              setShowProductModal(true);
+                            }}
+                            className="text-xs text-blue-600 hover:underline"
+                          >
+                            แก้ไข
+                          </button>
+                          <button
+                            onClick={() => handleToggleProduct(p)}
+                            className={`text-xs ${active ? 'text-red-500' : 'text-slate-600'} hover:underline`}
+                          >
+                            {active ? 'Deactivate' : 'Activate'}
+                          </button>
+                        </>
+                      ) : (
+                        <span className="text-xs text-slate-400 italic">ไม่มีสิทธิ์จัดการสต็อก</span>
+                      )}
                     </td>
                   </tr>
                 );
@@ -340,19 +396,26 @@ export default function MiniERP() {
           </table>
         </section>
 
-        {/* Customers Section */}
+        {/* Customers Section (Sales Only) */}
         <section className="bg-white rounded-xl shadow-sm border border-slate-100 p-6 space-y-4">
           <div className="flex justify-between items-center">
-            <h2 className="text-lg font-bold">👥 รายชื่อลูกค้า (Customers)</h2>
-            <button
-              onClick={() => {
-                setCustomerForm({ id: null, name: '', tax_id: '', address: '' });
-                setShowCustomerModal(true);
-              }}
-              className="text-xs bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg"
-            >
-              + เพิ่มลูกค้า
-            </button>
+            <div>
+              <h2 className="text-lg font-bold">👥 รายชื่อลูกค้า (Customers)</h2>
+              {!canManageCustomer && (
+                <span className="text-xs text-slate-400">บทบาท {role} ดูข้อมูลได้อย่างเดียว (ห้ามจัดการลูกค้า)</span>
+              )}
+            </div>
+            {canManageCustomer && (
+              <button
+                onClick={() => {
+                  setCustomerForm({ id: null, name: '', tax_id: '', address: '' });
+                  setShowCustomerModal(true);
+                }}
+                className="text-xs bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg"
+              >
+                + เพิ่มลูกค้า
+              </button>
+            )}
           </div>
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 text-slate-500 font-semibold border-b">
@@ -372,21 +435,27 @@ export default function MiniERP() {
                     <td className="p-3">{c.tax_id || '-'}</td>
                     <td className="p-3 text-slate-500">{c.address || '-'}</td>
                     <td className="p-3 text-right space-x-2">
-                      <button
-                        onClick={() => {
-                          setCustomerForm({ id: c.id, name: c.name, tax_id: c.tax_id || '', address: c.address || '' });
-                          setShowCustomerModal(true);
-                        }}
-                        className="text-xs text-blue-600 hover:underline"
-                      >
-                        แก้ไข
-                      </button>
-                      <button
-                        onClick={() => handleToggleCustomer(c)}
-                        className={`text-xs ${active ? 'text-red-500' : 'text-slate-600'} hover:underline`}
-                      >
-                        {active ? 'Deactivate' : 'Activate'}
-                      </button>
+                      {canManageCustomer ? (
+                        <>
+                          <button
+                            onClick={() => {
+                              setCustomerForm({ id: c.id, name: c.name, tax_id: c.tax_id || '', address: c.address || '' });
+                              setShowCustomerModal(true);
+                            }}
+                            className="text-xs text-blue-600 hover:underline"
+                          >
+                            แก้ไข
+                          </button>
+                          <button
+                            onClick={() => handleToggleCustomer(c)}
+                            className={`text-xs ${active ? 'text-red-500' : 'text-slate-600'} hover:underline`}
+                          >
+                            {active ? 'Deactivate' : 'Activate'}
+                          </button>
+                        </>
+                      ) : (
+                        <span className="text-xs text-slate-400 italic">ไม่มีสิทธิ์แก้ไขลูกค้า</span>
+                      )}
                     </td>
                   </tr>
                 );
@@ -395,9 +464,14 @@ export default function MiniERP() {
           </table>
         </section>
 
-        {/* Invoices Section */}
+        {/* Invoices Section (Accountant Only) */}
         <section className="bg-white rounded-xl shadow-sm border border-slate-100 p-6 space-y-4">
-          <h2 className="text-lg font-bold">📄 ใบแจ้งหนี้และการชำระเงิน (Invoices)</h2>
+          <div className="flex justify-between items-center">
+            <h2 className="text-lg font-bold">📄 ใบแจ้งหนี้และการชำระเงิน (Invoices)</h2>
+            {role !== 'Accountant' && role !== 'Admin' && (
+              <span className="text-xs text-slate-400">เฉพาะ Accountant และ Admin ที่รับชำระเงินได้</span>
+            )}
+          </div>
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 text-slate-500 font-semibold border-b">
               <tr>
@@ -425,7 +499,7 @@ export default function MiniERP() {
                       </span>
                     </td>
                     <td className="p-3 text-right">
-                      {inv.status !== 'Paid' && (
+                      {inv.status !== 'Paid' && (role === 'Accountant' || role === 'Admin') && (
                         <button
                           onClick={() => handleMarkPaid(inv.id)}
                           className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg shadow-sm"
@@ -442,12 +516,11 @@ export default function MiniERP() {
         </section>
       </div>
 
-      {/* จุดที่ 4: MODAL สำหรับเลือกสร้างออเดอร์เองสดๆ */}
+      {/* MODAL: Custom Order Form */}
       {showOrderModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <form onSubmit={handleCustomOrderSubmit} className="bg-white p-6 rounded-xl max-w-md w-full space-y-4 shadow-xl">
             <h3 className="font-bold text-base text-slate-800">สร้างใบสั่งซื้อใหม่ (Create Custom Order)</h3>
-            
             <div>
               <label className="text-xs font-semibold block mb-1 text-slate-700">เลือกลูกค้า:</label>
               <select
@@ -461,7 +534,6 @@ export default function MiniERP() {
                 ))}
               </select>
             </div>
-
             <div>
               <label className="text-xs font-semibold block mb-1 text-slate-700">เลือกสินค้า:</label>
               <select
@@ -477,7 +549,6 @@ export default function MiniERP() {
                 ))}
               </select>
             </div>
-
             <div>
               <label className="text-xs font-semibold block mb-1 text-slate-700">จำนวนสั่งซื้อ (kg):</label>
               <input
@@ -489,7 +560,6 @@ export default function MiniERP() {
                 className="w-full border rounded-lg p-2 text-sm"
               />
             </div>
-
             <div className="flex justify-end space-x-2 pt-2">
               <button
                 type="button"
