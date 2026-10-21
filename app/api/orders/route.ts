@@ -45,13 +45,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Failed to update stock: ' + stockErr.message }, { status: 500 });
     }
 
-    // 2. สร้าง Order
+    // 2. สร้าง Order โดยใช้ status 'confirmed' (ตัวพิมพ์เล็กเพื่อผ่าน check constraint)
     const { data: orderData, error: orderErr } = await supabase
       .from('orders')
       .insert([
         {
           customer_id,
-          status: 'Confirmed',
+          status: 'confirmed',
           subtotal,
           vat_amount: vat,
           grand_total: grandTotal,
