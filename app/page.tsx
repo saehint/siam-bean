@@ -53,94 +53,103 @@ export default function MiniERP() {
     }
   };
 
-  // US-1 & US-3: Check Sales/Admin
+  // US-1 & US-3: Place Order with explicit Console Logging
   const handleConfirmOrder = async () => {
     setErrorBanner(null);
-    if (role !== 'Sales' && role !== 'Admin') {
-      setErrorBanner(`[HTTP 403 Forbidden] สิทธิ์ของคุณ (${role}) ไม่สามารถสร้างคำสั่งซื้อได้ (ต้องเป็น Sales หรือ Admin)`);
-      return;
-    }
 
     const targetProduct = products.find((p) => p.sku === 'ARB-1KG');
     const targetCustomer = customers[0];
 
     if (!targetProduct || !targetCustomer) {
-      setErrorBanner('ไม่พบข้อมูลสินค้า ARB-1KG หรือลูกค้า');
+      const msg = 'Product ARB-1KG or Customer record not found.';
+      console.error('[ERP Error]', msg);
+      setErrorBanner(msg);
       return;
     }
 
-    const res = await fetch('/api/orders', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        role,
-        customer_id: targetCustomer.id,
-        product_id: targetProduct.id,
-        quantity: 20,
-      }),
-    });
+    try {
+      const res = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role,
+          customer_id: targetCustomer.id,
+          product_id: targetProduct.id,
+          quantity: 20,
+        }),
+      });
 
-    const result = await res.json();
-    if (!res.ok) {
-      setErrorBanner(`[HTTP ${res.status}] ${result.error}`);
-      return;
+      const result = await res.json();
+      if (!res.ok) {
+        // บังคับพิมพ์ Error ลง Console ให้เห็นชัดเจน
+        console.error(`[Server 403 Forbidden] Access Denied: User role "${role}" is not authorized.`, result);
+        setErrorBanner(`[HTTP ${res.status}] ${result.error}`);
+        return;
+      }
+
+      console.log('[ERP Success] Order processed successfully:', result);
+      fetchData();
+    } catch (err) {
+      console.error('[Network Error]', err);
+      setErrorBanner('Failed to execute network request.');
     }
-
-    fetchData();
   };
 
   const handleCustomOrderSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorBanner(null);
 
-    if (role !== 'Sales' && role !== 'Admin') {
-      setErrorBanner(`[HTTP 403 Forbidden] สิทธิ์ของคุณ (${role}) ไม่สามารถสร้างคำสั่งซื้อได้`);
-      return;
-    }
-
     if (!orderForm.customerId || !orderForm.productId) {
-      setErrorBanner('กรุณาเลือกลูกค้าและสินค้าให้ครบถ้วน');
+      setErrorBanner('Please select both a customer and a product.');
       return;
     }
 
-    const res = await fetch('/api/orders', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        role,
-        customer_id: parseInt(orderForm.customerId),
-        product_id: parseInt(orderForm.productId),
-        quantity: Number(orderForm.quantity),
-      }),
-    });
+    try {
+      const res = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role,
+          customer_id: parseInt(orderForm.customerId),
+          product_id: parseInt(orderForm.productId),
+          quantity: Number(orderForm.quantity),
+        }),
+      });
 
-    const result = await res.json();
-    if (!res.ok) {
-      setErrorBanner(`[HTTP ${res.status}] ${result.error}`);
-      return;
+      const result = await res.json();
+      if (!res.ok) {
+        console.error(`[Server 403 Forbidden] Access Denied: Role "${role}" rejected.`, result);
+        setErrorBanner(`[HTTP ${res.status}] ${result.error}`);
+        return;
+      }
+
+      console.log('[ERP Success] Custom order confirmed:', result);
+      setShowOrderModal(false);
+      fetchData();
+    } catch (err) {
+      console.error('[Network Error]', err);
+      setErrorBanner('Request failed.');
     }
-
-    setShowOrderModal(false);
-    fetchData();
   };
 
-  // Warehouse RBAC: เฉพาะ Warehouse และ Admin เท่านั้นที่ยุ่งกับสต็อก/สินค้าได้
+  // RBAC Access Rules
   const canManageWarehouse = role === 'Warehouse' || role === 'Admin';
-
-  // Customer RBAC: เฉพาะ Sales และ Admin เท่านั้นที่เพิ่ม/แก้ไขลูกค้าได้
   const canManageCustomer = role === 'Sales' || role === 'Admin';
 
   // US-2: Stock-In Form Handler
   const handleStockInSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canManageWarehouse) {
-      setErrorBanner(`[HTTP 403 Forbidden] สิทธิ์ของคุณ (${role}) ไม่สามารถจัดการสต็อกสินค้าได้`);
+      const msg = `[HTTP 403 Forbidden] Role "${role}" has no warehouse management permissions.`;
+      console.error(msg);
+      setErrorBanner(msg);
       setShowStockModal(null);
       return;
     }
     if (!showStockModal) return;
     const newQty = showStockModal.stock_qty + Number(stockAddAmount);
     await supabase.from('products').update({ stock_qty: newQty }).eq('id', showStockModal.id);
+    console.log(`[Stock-in] Added ${stockAddAmount} units to SKU: ${showStockModal.sku}`);
     setShowStockModal(null);
     fetchData();
   };
@@ -148,18 +157,21 @@ export default function MiniERP() {
   // US-4: Payments (Accountant only)
   const handleMarkPaid = async (invId: number) => {
     if (role !== 'Accountant' && role !== 'Admin') {
-      setErrorBanner(`[HTTP 403 Forbidden] สิทธิ์ของคุณ (${role}) ไม่สามารถบันทึกรับเงินได้ (ต้องเป็น Accountant หรือ Admin)`);
+      const msg = `[HTTP 403 Forbidden] Role "${role}" cannot process payments (Requires Accountant/Admin).`;
+      console.error(msg);
+      setErrorBanner(msg);
       return;
     }
     await supabase.from('invoices').update({ status: 'Paid' }).eq('id', invId);
+    console.log(`[Payment] Invoice #${invId} updated to Paid.`);
     fetchData();
   };
 
-  // Product CRUD
+  // Product CRUD Handlers
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canManageWarehouse) {
-      setErrorBanner(`[HTTP 403 Forbidden] สิทธิ์ของคุณ (${role}) ไม่สามารถจัดการสินค้าได้`);
+      setErrorBanner(`[HTTP 403 Forbidden] Only Warehouse personnel can edit products.`);
       setShowProductModal(false);
       return;
     }
@@ -183,18 +195,18 @@ export default function MiniERP() {
 
   const handleToggleProduct = async (p: any) => {
     if (!canManageWarehouse) {
-      setErrorBanner(`[HTTP 403 Forbidden] สิทธิ์ของคุณ (${role}) ไม่สามารถเปลี่ยนสถานะสินค้าได้`);
+      setErrorBanner(`[HTTP 403 Forbidden] Only Warehouse personnel can change product status.`);
       return;
     }
     await supabase.from('products').update({ is_active: !(p.is_active !== false) }).eq('id', p.id);
     fetchData();
   };
 
-  // Customer CRUD
+  // Customer CRUD Handlers
   const handleSaveCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canManageCustomer) {
-      setErrorBanner(`[HTTP 403 Forbidden] สิทธิ์ของคุณ (${role}) ไม่สามารถจัดการข้อมูลลูกค้าได้ (ต้องเป็น Sales หรือ Admin)`);
+      setErrorBanner(`[HTTP 403 Forbidden] Only Sales representatives can manage customer accounts.`);
       setShowCustomerModal(false);
       return;
     }
@@ -216,7 +228,7 @@ export default function MiniERP() {
 
   const handleToggleCustomer = async (c: any) => {
     if (!canManageCustomer) {
-      setErrorBanner(`[HTTP 403 Forbidden] สิทธิ์ของคุณ (${role}) ไม่สามารถจัดการลูกค้าได้`);
+      setErrorBanner(`[HTTP 403 Forbidden] Only Sales representatives can toggle customer status.`);
       return;
     }
     await supabase.from('customers').update({ is_active: !(c.is_active !== false) }).eq('id', c.id);
@@ -224,72 +236,105 @@ export default function MiniERP() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 p-8 font-sans">
-      <div className="max-w-6xl mx-auto space-y-6">
-        {/* Header & Role Switcher */}
-        <header className="flex flex-col md:flex-row md:items-center justify-between pb-6 border-b bg-white p-6 rounded-xl shadow-sm">
+    <div className="min-h-screen bg-[#F8FAFC] text-slate-800 p-6 md:p-10 font-sans antialiased">
+      <div className="max-w-6xl mx-auto space-y-8">
+        
+        {/* Top Header & Role Switcher */}
+        <header className="flex flex-col md:flex-row md:items-center justify-between pb-6 border-b border-slate-200/80 gap-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Siam Bean Co. - Mini ERP</h1>
-            <p className="text-sm text-slate-500">Sales, Warehouse, and Accounting Integration</p>
+            <div className="flex items-center space-x-3">
+              <span className="w-3.5 h-3.5 rounded-full bg-blue-600 inline-block shadow-sm"></span>
+              <h1 className="text-2xl font-bold tracking-tight text-slate-900">Siam Bean Co. — Mini ERP</h1>
+            </div>
+            <p className="text-xs text-slate-500 font-medium mt-1">
+              Enterprise Resource Planning • Sales, Warehouse & Accounting Core
+            </p>
           </div>
-          <div className="mt-4 md:mt-0 flex items-center space-x-2">
-            <span className="text-xs font-semibold text-slate-500 mr-2">สลับบทบาท (Demo Role):</span>
-            {(['Admin', 'Sales', 'Warehouse', 'Accountant'] as const).map((r) => (
-              <button
-                key={r}
-                onClick={() => { setRole(r); setErrorBanner(null); }}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                  role === r ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                }`}
-              >
-                {r}
-              </button>
-            ))}
+
+          <div className="flex items-center bg-white p-1.5 rounded-xl border border-slate-200/90 shadow-xs space-x-1">
+            <span className="text-[11px] font-bold text-slate-400 px-3 uppercase tracking-wider">Demo Role:</span>
+            {(['Admin', 'Sales', 'Warehouse', 'Accountant'] as const).map((r) => {
+              const active = role === r;
+              return (
+                <button
+                  key={r}
+                  onClick={() => { setRole(r); setErrorBanner(null); }}
+                  className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all duration-150 ${
+                    active
+                      ? 'bg-blue-600 text-white shadow-sm scale-102'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
+                >
+                  {r}
+                </button>
+              );
+            })}
           </div>
         </header>
 
-        {/* Error Banner */}
+        {/* Dynamic Alert Banner */}
         {errorBanner && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between shadow-sm">
-            <span className="text-sm font-medium">{errorBanner}</span>
-            <button onClick={() => setErrorBanner(null)} className="text-xs font-bold uppercase underline">ปิด</button>
+          <div className="bg-rose-50 border border-rose-200/90 text-rose-800 px-5 py-3.5 rounded-xl flex items-center justify-between shadow-xs animate-in fade-in duration-200">
+            <div className="flex items-center space-x-3">
+              <span className="text-rose-500 text-base">⚠️</span>
+              <span className="text-xs font-semibold tracking-wide">{errorBanner}</span>
+            </div>
+            <button
+              onClick={() => setErrorBanner(null)}
+              className="text-xs font-bold text-rose-600 hover:text-rose-800 uppercase tracking-wider"
+            >
+              Dismiss
+            </button>
           </div>
         )}
 
-        {/* Dashboard 3 Numbers */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-            <span className="text-xs font-bold text-slate-400 tracking-wider uppercase">Total Paid Sales</span>
-            <div className="text-3xl font-extrabold text-emerald-600 mt-2">{stats.totalPaid.toLocaleString()} THB</div>
-            <p className="text-xs text-slate-400 mt-1">ยอดขายที่ชำระเงินเรียบร้อยแล้ว</p>
-          </div>
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-            <span className="text-xs font-bold text-slate-400 tracking-wider uppercase">Low-Stock Alert</span>
-            <div className={`text-3xl font-extrabold mt-2 ${stats.lowStock > 0 ? 'text-amber-500' : 'text-slate-800'}`}>
-              {stats.lowStock} รายการ
+        {/* Dashboard Metrics (3 Key Numbers) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md transition-shadow">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Paid Revenue</span>
+            <div className="text-3xl font-extrabold text-emerald-600 mt-2 tracking-tight">
+              {stats.totalPaid.toLocaleString()} <span className="text-sm font-semibold text-slate-500">THB</span>
             </div>
-            <p className="text-xs text-slate-400 mt-1">สินค้าที่สต็อกต่ำกว่าเกณฑ์แจ้งเตือน</p>
+            <p className="text-[11px] text-slate-400 mt-2 font-medium">Reconciled payments from cleared invoices</p>
           </div>
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-            <span className="text-xs font-bold text-slate-400 tracking-wider uppercase">Open Invoices</span>
-            <div className="text-3xl font-extrabold text-blue-600 mt-2">{stats.openInvoices} ใบ</div>
-            <p className="text-xs text-slate-400 mt-1">ใบแจ้งหนี้ค้างชำระ (Unpaid)</p>
+
+          <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md transition-shadow">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Low-Stock Alert</span>
+            <div className={`text-3xl font-extrabold mt-2 tracking-tight ${stats.lowStock > 0 ? 'text-amber-500' : 'text-slate-800'}`}>
+              {stats.lowStock} <span className="text-sm font-semibold text-slate-500">SKUs</span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-2 font-medium">Items currently beneath safety stock threshold</p>
+          </div>
+
+          <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md transition-shadow">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Outstanding Invoices</span>
+            <div className="text-3xl font-extrabold text-blue-600 mt-2 tracking-tight">
+              {stats.openInvoices} <span className="text-sm font-semibold text-slate-500">Issued</span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-2 font-medium">Pending accounts receivable (Unpaid)</p>
           </div>
         </div>
 
-        {/* Sales Orders Section */}
-        <div className="bg-blue-50 border border-blue-200 p-6 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4">
+        {/* Sales Order Action Bar (US-1 Standard Requirement) */}
+        <div className="bg-gradient-to-r from-blue-50/90 to-indigo-50/70 border border-blue-200/80 p-6 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-5 shadow-xs">
           <div>
-            <h3 className="font-bold text-blue-900 text-base">🛒 ระบบออกคำสั่งซื้อ (Sales Orders)</h3>
-            <p className="text-xs text-blue-700 mt-1">
-              เคสตามโจทย์: Café Lune สั่งซื้อ 20 kg (ARB-1KG) = 9,630 THB (รวม VAT 7%)
+            <div className="flex items-center space-x-2">
+              <span className="text-xs font-bold uppercase tracking-wider bg-blue-100 text-blue-700 px-2.5 py-0.5 rounded-full">
+                Test Case (US-1)
+              </span>
+              <h3 className="font-bold text-slate-900 text-base">Café Lune — 20 kg Order (ARB-1KG)</h3>
+            </div>
+            <p className="text-xs text-slate-600 mt-1 font-medium">
+              450 THB/kg × 20 kg = 9,000 THB + 7% VAT (630 THB) = Total <strong className="text-blue-900">9,630 THB</strong>
             </p>
           </div>
-          <div className="flex flex-wrap gap-2 w-full md:w-auto">
+          <div className="flex flex-wrap gap-2.5 w-full md:w-auto">
             <button
               onClick={() => {
                 if (role !== 'Sales' && role !== 'Admin') {
-                  setErrorBanner(`[HTTP 403 Forbidden] สิทธิ์ของคุณ (${role}) ไม่สามารถสร้างคำสั่งซื้อได้`);
+                  const msg = `[HTTP 403 Forbidden] Role "${role}" cannot issue custom orders.`;
+                  console.error(msg);
+                  setErrorBanner(msg);
                   return;
                 }
                 if (customers.length > 0 && products.length > 0) {
@@ -301,26 +346,26 @@ export default function MiniERP() {
                 }
                 setShowOrderModal(true);
               }}
-              className="px-4 py-2.5 bg-white hover:bg-slate-100 text-blue-700 font-semibold text-sm rounded-lg border border-blue-300 shadow-sm transition"
+              className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-800 font-semibold text-xs rounded-xl border border-slate-200 shadow-xs transition"
             >
-              + สร้างออเดอร์เอง
+              + Custom Order
             </button>
             <button
               onClick={handleConfirmOrder}
-              className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-lg shadow transition"
+              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-xs transition"
             >
-              ยืนยันตามโจทย์ด่วน (20 kg)
+              Confirm 20 kg Order (Quick Demo)
             </button>
           </div>
         </div>
 
-        {/* Products Section (Warehouse Only) */}
-        <section className="bg-white rounded-xl shadow-sm border border-slate-100 p-6 space-y-4">
+        {/* Products & Inventory Section */}
+        <section className="bg-white rounded-2xl shadow-xs border border-slate-200/80 p-6 space-y-4">
           <div className="flex justify-between items-center">
             <div>
-              <h2 className="text-lg font-bold">📦 รายการสินค้าและสต็อก (Products)</h2>
+              <h2 className="text-base font-bold text-slate-900">Inventory & Products (US-2)</h2>
               {!canManageWarehouse && (
-                <span className="text-xs text-slate-400">บทบาท {role} ดูข้อมูลได้อย่างเดียว (ห้ามแก้ไขคลัง)</span>
+                <span className="text-xs text-slate-400 font-medium">Read-only view for {role} role</span>
               )}
             </div>
             {canManageWarehouse && (
@@ -329,80 +374,86 @@ export default function MiniERP() {
                   setProductForm({ id: null, sku: '', name: '', price: '', stock_qty: '', min_stock_alert: '20' });
                   setShowProductModal(true);
                 }}
-                className="text-xs bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg"
+                className="text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-1.5 rounded-lg shadow-xs transition"
               >
-                + เพิ่มสินค้า
+                + New Product
               </button>
             )}
           </div>
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-slate-500 font-semibold border-b">
-              <tr>
-                <th className="p-3">SKU</th>
-                <th className="p-3">ชื่อสินค้า</th>
-                <th className="p-3">ราคา/หน่วย</th>
-                <th className="p-3">สต็อกคงเหลือ</th>
-                <th className="p-3 text-right">การจัดการ</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {products.map((p) => {
-                const isLow = p.stock_qty <= p.min_stock_alert;
-                const active = p.is_active !== false;
-                return (
-                  <tr key={p.id} className={!active ? 'opacity-40 bg-slate-50' : ''}>
-                    <td className="p-3 font-medium">{p.sku}</td>
-                    <td className="p-3">{p.name} {!active && <span className="text-xs text-red-500">(Deactivated)</span>}</td>
-                    <td className="p-3">{Number(p.price).toLocaleString()} THB</td>
-                    <td className="p-3">
-                      <span className="font-bold">{p.stock_qty} kg</span>
-                      {isLow && active && (
-                        <span className="ml-2 px-2 py-0.5 text-xs bg-amber-100 text-amber-800 font-bold rounded-full">Low Stock</span>
-                      )}
-                    </td>
-                    <td className="p-3 text-right space-x-2">
-                      {canManageWarehouse ? (
-                        <>
-                          <button
-                            onClick={() => { setShowStockModal(p); setStockAddAmount(50); }}
-                            className="text-xs bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 px-2 py-1 rounded"
-                          >
-                            + Stock-in Form
-                          </button>
-                          <button
-                            onClick={() => {
-                              setProductForm({ id: p.id, sku: p.sku, name: p.name, price: p.price, stock_qty: p.stock_qty, min_stock_alert: p.min_stock_alert });
-                              setShowProductModal(true);
-                            }}
-                            className="text-xs text-blue-600 hover:underline"
-                          >
-                            แก้ไข
-                          </button>
-                          <button
-                            onClick={() => handleToggleProduct(p)}
-                            className={`text-xs ${active ? 'text-red-500' : 'text-slate-600'} hover:underline`}
-                          >
-                            {active ? 'Deactivate' : 'Activate'}
-                          </button>
-                        </>
-                      ) : (
-                        <span className="text-xs text-slate-400 italic">ไม่มีสิทธิ์จัดการสต็อก</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50/80 text-slate-500 font-semibold border-b border-slate-200/80">
+                <tr>
+                  <th className="py-3 px-4">SKU</th>
+                  <th className="py-3 px-4">Product Name</th>
+                  <th className="py-3 px-4">Unit Price</th>
+                  <th className="py-3 px-4">Stock on Hand</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {products.map((p) => {
+                  const isLow = p.stock_qty <= p.min_stock_alert;
+                  const active = p.is_active !== false;
+                  return (
+                    <tr key={p.id} className={!active ? 'opacity-40 bg-slate-50/50' : 'hover:bg-slate-50/50'}>
+                      <td className="py-3.5 px-4 font-mono font-bold text-slate-700">{p.sku}</td>
+                      <td className="py-3.5 px-4 font-medium text-slate-900">
+                        {p.name} {!active && <span className="ml-1 text-[10px] text-rose-500 font-bold">(Deactivated)</span>}
+                      </td>
+                      <td className="py-3.5 px-4 font-semibold text-slate-700">{Number(p.price).toLocaleString()} THB</td>
+                      <td className="py-3.5 px-4">
+                        <span className="font-bold text-slate-900">{p.stock_qty} kg</span>
+                        {isLow && active && (
+                          <span className="ml-2.5 px-2 py-0.5 text-[10px] bg-amber-100 text-amber-800 font-bold rounded-full">
+                            Low Stock
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 text-right space-x-2">
+                        {canManageWarehouse ? (
+                          <>
+                            <button
+                              onClick={() => { setShowStockModal(p); setStockAddAmount(50); }}
+                              className="text-[11px] font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-md transition"
+                            >
+                              + Stock-in Form
+                            </button>
+                            <button
+                              onClick={() => {
+                                setProductForm({ id: p.id, sku: p.sku, name: p.name, price: p.price, stock_qty: p.stock_qty, min_stock_alert: p.min_stock_alert });
+                                setShowProductModal(true);
+                              }}
+                              className="text-[11px] font-medium text-blue-600 hover:underline"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleToggleProduct(p)}
+                              className={`text-[11px] font-medium ${active ? 'text-rose-500' : 'text-slate-600'} hover:underline`}
+                            >
+                              {active ? 'Deactivate' : 'Activate'}
+                            </button>
+                          </>
+                        ) : (
+                          <span className="text-[11px] text-slate-400 italic">No access</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </section>
 
-        {/* Customers Section (Sales Only) */}
-        <section className="bg-white rounded-xl shadow-sm border border-slate-100 p-6 space-y-4">
+        {/* Customers Section */}
+        <section className="bg-white rounded-2xl shadow-xs border border-slate-200/80 p-6 space-y-4">
           <div className="flex justify-between items-center">
             <div>
-              <h2 className="text-lg font-bold">👥 รายชื่อลูกค้า (Customers)</h2>
+              <h2 className="text-base font-bold text-slate-900">Customer Directory</h2>
               {!canManageCustomer && (
-                <span className="text-xs text-slate-400">บทบาท {role} ดูข้อมูลได้อย่างเดียว (ห้ามจัดการลูกค้า)</span>
+                <span className="text-xs text-slate-400 font-medium">Read-only view for {role} role</span>
               )}
             </div>
             {canManageCustomer && (
@@ -411,122 +462,130 @@ export default function MiniERP() {
                   setCustomerForm({ id: null, name: '', tax_id: '', address: '' });
                   setShowCustomerModal(true);
                 }}
-                className="text-xs bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg"
+                className="text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-1.5 rounded-lg shadow-xs transition"
               >
-                + เพิ่มลูกค้า
+                + New Customer
               </button>
             )}
           </div>
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-slate-500 font-semibold border-b">
-              <tr>
-                <th className="p-3">ชื่อลูกค้า</th>
-                <th className="p-3">เลขประจำตัวผู้เสียภาษี</th>
-                <th className="p-3">ที่อยู่</th>
-                <th className="p-3 text-right">การจัดการ</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {customers.map((c) => {
-                const active = c.is_active !== false;
-                return (
-                  <tr key={c.id} className={!active ? 'opacity-40 bg-slate-50' : ''}>
-                    <td className="p-3 font-medium">{c.name} {!active && <span className="text-xs text-red-500">(Deactivated)</span>}</td>
-                    <td className="p-3">{c.tax_id || '-'}</td>
-                    <td className="p-3 text-slate-500">{c.address || '-'}</td>
-                    <td className="p-3 text-right space-x-2">
-                      {canManageCustomer ? (
-                        <>
-                          <button
-                            onClick={() => {
-                              setCustomerForm({ id: c.id, name: c.name, tax_id: c.tax_id || '', address: c.address || '' });
-                              setShowCustomerModal(true);
-                            }}
-                            className="text-xs text-blue-600 hover:underline"
-                          >
-                            แก้ไข
-                          </button>
-                          <button
-                            onClick={() => handleToggleCustomer(c)}
-                            className={`text-xs ${active ? 'text-red-500' : 'text-slate-600'} hover:underline`}
-                          >
-                            {active ? 'Deactivate' : 'Activate'}
-                          </button>
-                        </>
-                      ) : (
-                        <span className="text-xs text-slate-400 italic">ไม่มีสิทธิ์แก้ไขลูกค้า</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50/80 text-slate-500 font-semibold border-b border-slate-200/80">
+                <tr>
+                  <th className="py-3 px-4">Customer Name</th>
+                  <th className="py-3 px-4">Tax ID</th>
+                  <th className="py-3 px-4">Billing Address</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {customers.map((c) => {
+                  const active = c.is_active !== false;
+                  return (
+                    <tr key={c.id} className={!active ? 'opacity-40 bg-slate-50/50' : 'hover:bg-slate-50/50'}>
+                      <td className="py-3.5 px-4 font-semibold text-slate-900">
+                        {c.name} {!active && <span className="ml-1 text-[10px] text-rose-500 font-bold">(Deactivated)</span>}
+                      </td>
+                      <td className="py-3.5 px-4 font-mono text-slate-600">{c.tax_id || 'N/A'}</td>
+                      <td className="py-3.5 px-4 text-slate-500">{c.address || 'N/A'}</td>
+                      <td className="py-3.5 px-4 text-right space-x-2">
+                        {canManageCustomer ? (
+                          <>
+                            <button
+                              onClick={() => {
+                                setCustomerForm({ id: c.id, name: c.name, tax_id: c.tax_id || '', address: c.address || '' });
+                                setShowCustomerModal(true);
+                              }}
+                              className="text-[11px] font-medium text-blue-600 hover:underline"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleToggleCustomer(c)}
+                              className={`text-[11px] font-medium ${active ? 'text-rose-500' : 'text-slate-600'} hover:underline`}
+                            >
+                              {active ? 'Deactivate' : 'Activate'}
+                            </button>
+                          </>
+                        ) : (
+                          <span className="text-[11px] text-slate-400 italic">No access</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </section>
 
-        {/* Invoices Section (Accountant Only) */}
-        <section className="bg-white rounded-xl shadow-sm border border-slate-100 p-6 space-y-4">
+        {/* Invoices & Billing Section (US-4) */}
+        <section className="bg-white rounded-2xl shadow-xs border border-slate-200/80 p-6 space-y-4">
           <div className="flex justify-between items-center">
-            <h2 className="text-lg font-bold">📄 ใบแจ้งหนี้และการชำระเงิน (Invoices)</h2>
+            <h2 className="text-base font-bold text-slate-900">Invoices & Reconciliations (US-4)</h2>
             {role !== 'Accountant' && role !== 'Admin' && (
-              <span className="text-xs text-slate-400">เฉพาะ Accountant และ Admin ที่รับชำระเงินได้</span>
+              <span className="text-xs text-slate-400 font-medium">Payment capture reserved for Accountant/Admin</span>
             )}
           </div>
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-slate-500 font-semibold border-b">
-              <tr>
-                <th className="p-3">เลขที่ใบแจ้งหนี้</th>
-                <th className="p-3">ยอดรวม (รวม VAT 7%)</th>
-                <th className="p-3">สถานะ</th>
-                <th className="p-3 text-right">การจัดการ</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {invoices.length === 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50/80 text-slate-500 font-semibold border-b border-slate-200/80">
                 <tr>
-                  <td colSpan={4} className="p-6 text-center text-slate-400">ยังไม่มีประวัติการออกใบแจ้งหนี้</td>
+                  <th className="py-3 px-4">Invoice #</th>
+                  <th className="py-3 px-4">Grand Total (incl. 7% VAT)</th>
+                  <th className="py-3 px-4">Payment Status</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
-              ) : (
-                invoices.map((inv) => (
-                  <tr key={inv.id}>
-                    <td className="p-3 font-medium">{inv.invoice_no}</td>
-                    <td className="p-3">{Number(inv.grand_total).toLocaleString()} THB</td>
-                    <td className="p-3">
-                      <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${
-                        inv.status === 'Paid' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                      }`}>
-                        {inv.status}
-                      </span>
-                    </td>
-                    <td className="p-3 text-right">
-                      {inv.status !== 'Paid' && (role === 'Accountant' || role === 'Admin') && (
-                        <button
-                          onClick={() => handleMarkPaid(inv.id)}
-                          className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg shadow-sm"
-                        >
-                          บันทึกรับเงิน (Mark as Paid)
-                        </button>
-                      )}
-                    </td>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {invoices.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-8 text-center text-slate-400 font-medium">No invoices created yet.</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  invoices.map((inv) => (
+                    <tr key={inv.id} className="hover:bg-slate-50/50">
+                      <td className="py-3.5 px-4 font-mono font-bold text-slate-800">{inv.invoice_no}</td>
+                      <td className="py-3.5 px-4 font-semibold text-slate-900">{Number(inv.grand_total).toLocaleString()} THB</td>
+                      <td className="py-3.5 px-4">
+                        <span className={`px-2.5 py-0.5 text-[11px] font-bold rounded-full ${
+                          inv.status === 'Paid' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                        }`}>
+                          {inv.status}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        {inv.status !== 'Paid' && (role === 'Accountant' || role === 'Admin') && (
+                          <button
+                            onClick={() => handleMarkPaid(inv.id)}
+                            className="text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg shadow-xs transition"
+                          >
+                            Mark as Paid
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </section>
+
       </div>
 
       {/* MODAL: Custom Order Form */}
       {showOrderModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <form onSubmit={handleCustomOrderSubmit} className="bg-white p-6 rounded-xl max-w-md w-full space-y-4 shadow-xl">
-            <h3 className="font-bold text-base text-slate-800">สร้างใบสั่งซื้อใหม่ (Create Custom Order)</h3>
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <form onSubmit={handleCustomOrderSubmit} className="bg-white p-6 rounded-2xl max-w-md w-full space-y-4 shadow-xl border border-slate-100">
+            <h3 className="font-bold text-base text-slate-900">Create Custom Sales Order</h3>
+            
             <div>
-              <label className="text-xs font-semibold block mb-1 text-slate-700">เลือกลูกค้า:</label>
+              <label className="text-xs font-semibold block mb-1.5 text-slate-700">Select Customer:</label>
               <select
                 value={orderForm.customerId}
                 onChange={(e) => setOrderForm({ ...orderForm, customerId: e.target.value })}
-                className="w-full border rounded-lg p-2 text-sm bg-white"
+                className="w-full border border-slate-300 rounded-lg p-2.5 text-xs bg-white focus:outline-blue-600"
                 required
               >
                 {customers.map((c) => (
@@ -534,45 +593,48 @@ export default function MiniERP() {
                 ))}
               </select>
             </div>
+
             <div>
-              <label className="text-xs font-semibold block mb-1 text-slate-700">เลือกสินค้า:</label>
+              <label className="text-xs font-semibold block mb-1.5 text-slate-700">Select Product:</label>
               <select
                 value={orderForm.productId}
                 onChange={(e) => setOrderForm({ ...orderForm, productId: e.target.value })}
-                className="w-full border rounded-lg p-2 text-sm bg-white"
+                className="w-full border border-slate-300 rounded-lg p-2.5 text-xs bg-white focus:outline-blue-600"
                 required
               >
                 {products.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name} (คงเหลือ: {p.stock_qty} kg, ราคา: {p.price} THB)
+                    {p.name} (Available: {p.stock_qty} kg @ {p.price} THB)
                   </option>
                 ))}
               </select>
             </div>
+
             <div>
-              <label className="text-xs font-semibold block mb-1 text-slate-700">จำนวนสั่งซื้อ (kg):</label>
+              <label className="text-xs font-semibold block mb-1.5 text-slate-700">Order Quantity (kg):</label>
               <input
                 type="number"
                 min="1"
                 required
                 value={orderForm.quantity}
                 onChange={(e) => setOrderForm({ ...orderForm, quantity: parseInt(e.target.value) || 1 })}
-                className="w-full border rounded-lg p-2 text-sm"
+                className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:outline-blue-600"
               />
             </div>
+
             <div className="flex justify-end space-x-2 pt-2">
               <button
                 type="button"
                 onClick={() => setShowOrderModal(false)}
-                className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg"
+                className="px-3.5 py-2 text-xs text-slate-600 hover:bg-slate-100 rounded-lg font-medium"
               >
-                ยกเลิก
+                Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-sm"
+                className="px-4 py-2 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-xs"
               >
-                ออกใบสั่งซื้อและตัดสต็อก
+                Issue Order & Deduct Stock
               </button>
             </div>
           </form>
@@ -581,24 +643,24 @@ export default function MiniERP() {
 
       {/* MODAL: Stock-in Form */}
       {showStockModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <form onSubmit={handleStockInSubmit} className="bg-white p-6 rounded-xl max-w-sm w-full space-y-4 shadow-xl">
-            <h3 className="font-bold text-base text-slate-800">เติมสต็อกสินค้า (Stock-in Form)</h3>
-            <p className="text-xs text-slate-500">สินค้า: {showStockModal.name} ({showStockModal.sku})</p>
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <form onSubmit={handleStockInSubmit} className="bg-white p-6 rounded-2xl max-w-sm w-full space-y-4 shadow-xl border border-slate-100">
+            <h3 className="font-bold text-base text-slate-900">Restock Product (Stock-in Form)</h3>
+            <p className="text-xs text-slate-500">Target Item: {showStockModal.name} ({showStockModal.sku})</p>
             <div>
-              <label className="text-xs font-semibold block mb-1 text-slate-700">จำนวนที่ต้องการนำเข้า (kg):</label>
+              <label className="text-xs font-semibold block mb-1.5 text-slate-700">Quantity to Inbound (kg):</label>
               <input
                 type="number"
                 min="1"
                 required
                 value={stockAddAmount}
                 onChange={(e) => setStockAddAmount(parseInt(e.target.value) || 0)}
-                className="w-full border rounded-lg p-2 text-sm"
+                className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:outline-blue-600"
               />
             </div>
             <div className="flex justify-end space-x-2">
-              <button type="button" onClick={() => setShowStockModal(null)} className="px-3 py-1.5 text-xs text-slate-600">ยกเลิก</button>
-              <button type="submit" className="px-4 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold shadow-sm">ยืนยันการเติมสต็อก</button>
+              <button type="button" onClick={() => setShowStockModal(null)} className="px-3 py-1.5 text-xs text-slate-600 font-medium">Cancel</button>
+              <button type="submit" className="px-4 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold shadow-xs">Confirm Stock-in</button>
             </div>
           </form>
         </div>
@@ -606,30 +668,30 @@ export default function MiniERP() {
 
       {/* MODAL: Product Form */}
       {showProductModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <form onSubmit={handleSaveProduct} className="bg-white p-6 rounded-xl max-w-md w-full space-y-3 shadow-xl">
-            <h3 className="font-bold text-base text-slate-800">{productForm.id ? 'แก้ไขสินค้า' : 'สร้างสินค้าใหม่'}</h3>
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <form onSubmit={handleSaveProduct} className="bg-white p-6 rounded-2xl max-w-md w-full space-y-3 shadow-xl border border-slate-100">
+            <h3 className="font-bold text-base text-slate-900">{productForm.id ? 'Edit Product' : 'Create New Product'}</h3>
             <div>
               <label className="text-xs font-semibold block mb-1 text-slate-700">SKU:</label>
-              <input required value={productForm.sku} onChange={(e) => setProductForm({ ...productForm, sku: e.target.value })} className="w-full border rounded-lg p-2 text-sm" />
+              <input required value={productForm.sku} onChange={(e) => setProductForm({ ...productForm, sku: e.target.value })} className="w-full border border-slate-300 rounded-lg p-2 text-xs" />
             </div>
             <div>
-              <label className="text-xs font-semibold block mb-1 text-slate-700">ชื่อสินค้า:</label>
-              <input required value={productForm.name} onChange={(e) => setProductForm({ ...productForm, name: e.target.value })} className="w-full border rounded-lg p-2 text-sm" />
+              <label className="text-xs font-semibold block mb-1 text-slate-700">Product Name:</label>
+              <input required value={productForm.name} onChange={(e) => setProductForm({ ...productForm, name: e.target.value })} className="w-full border border-slate-300 rounded-lg p-2 text-xs" />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="text-xs font-semibold block mb-1 text-slate-700">ราคา (THB):</label>
-                <input type="number" step="0.01" required value={productForm.price} onChange={(e) => setProductForm({ ...productForm, price: e.target.value })} className="w-full border rounded-lg p-2 text-sm" />
+                <label className="text-xs font-semibold block mb-1 text-slate-700">Unit Price (THB):</label>
+                <input type="number" step="0.01" required value={productForm.price} onChange={(e) => setProductForm({ ...productForm, price: e.target.value })} className="w-full border border-slate-300 rounded-lg p-2 text-xs" />
               </div>
               <div>
-                <label className="text-xs font-semibold block mb-1 text-slate-700">สต็อกคงเหลือ:</label>
-                <input type="number" required value={productForm.stock_qty} onChange={(e) => setProductForm({ ...productForm, stock_qty: e.target.value })} className="w-full border rounded-lg p-2 text-sm" />
+                <label className="text-xs font-semibold block mb-1 text-slate-700">Stock on Hand:</label>
+                <input type="number" required value={productForm.stock_qty} onChange={(e) => setProductForm({ ...productForm, stock_qty: e.target.value })} className="w-full border border-slate-300 rounded-lg p-2 text-xs" />
               </div>
             </div>
             <div className="flex justify-end space-x-2 pt-2">
-              <button type="button" onClick={() => setShowProductModal(false)} className="px-3 py-1.5 text-xs text-slate-600">ยกเลิก</button>
-              <button type="submit" className="px-4 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-sm">บันทึก</button>
+              <button type="button" onClick={() => setShowProductModal(false)} className="px-3.5 py-1.5 text-xs text-slate-600 font-medium">Cancel</button>
+              <button type="submit" className="px-4 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-xs">Save</button>
             </div>
           </form>
         </div>
@@ -637,28 +699,29 @@ export default function MiniERP() {
 
       {/* MODAL: Customer Form */}
       {showCustomerModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <form onSubmit={handleSaveCustomer} className="bg-white p-6 rounded-xl max-w-md w-full space-y-3 shadow-xl">
-            <h3 className="font-bold text-base text-slate-800">{customerForm.id ? 'แก้ไขข้อมูลลูกค้า' : 'สร้างลูกค้าใหม่'}</h3>
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <form onSubmit={handleSaveCustomer} className="bg-white p-6 rounded-2xl max-w-md w-full space-y-3 shadow-xl border border-slate-100">
+            <h3 className="font-bold text-base text-slate-900">{customerForm.id ? 'Edit Customer' : 'Create New Customer'}</h3>
             <div>
-              <label className="text-xs font-semibold block mb-1 text-slate-700">ชื่อลูกค้า / บริษัท:</label>
-              <input required value={customerForm.name} onChange={(e) => setCustomerForm({ ...customerForm, name: e.target.value })} className="w-full border rounded-lg p-2 text-sm" />
+              <label className="text-xs font-semibold block mb-1 text-slate-700">Customer Name / Company:</label>
+              <input required value={customerForm.name} onChange={(e) => setCustomerForm({ ...customerForm, name: e.target.value })} className="w-full border border-slate-300 rounded-lg p-2 text-xs" />
             </div>
             <div>
-              <label className="text-xs font-semibold block mb-1 text-slate-700">เลขประจำตัวผู้เสียภาษี (Tax ID):</label>
-              <input required value={customerForm.tax_id} onChange={(e) => setCustomerForm({ ...customerForm, tax_id: e.target.value })} className="w-full border rounded-lg p-2 text-sm" />
+              <label className="text-xs font-semibold block mb-1 text-slate-700">Tax ID:</label>
+              <input required value={customerForm.tax_id} onChange={(e) => setCustomerForm({ ...customerForm, tax_id: e.target.value })} className="w-full border border-slate-300 rounded-lg p-2 text-xs" />
             </div>
             <div>
-              <label className="text-xs font-semibold block mb-1 text-slate-700">ที่อยู่:</label>
-              <textarea value={customerForm.address} onChange={(e) => setCustomerForm({ ...customerForm, address: e.target.value })} className="w-full border rounded-lg p-2 text-sm" rows={2} />
+              <label className="text-xs font-semibold block mb-1 text-slate-700">Address:</label>
+              <textarea value={customerForm.address} onChange={(e) => setCustomerForm({ ...customerForm, address: e.target.value })} className="w-full border border-slate-300 rounded-lg p-2 text-xs" rows={2} />
             </div>
             <div className="flex justify-end space-x-2 pt-2">
-              <button type="button" onClick={() => setShowCustomerModal(false)} className="px-3 py-1.5 text-xs text-slate-600">ยกเลิก</button>
-              <button type="submit" className="px-4 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-sm">บันทึก</button>
+              <button type="button" onClick={() => setShowCustomerModal(false)} className="px-3.5 py-1.5 text-xs text-slate-600 font-medium">Cancel</button>
+              <button type="submit" className="px-4 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-xs">Save</button>
             </div>
           </form>
         </div>
       )}
+
     </div>
   );
 }
