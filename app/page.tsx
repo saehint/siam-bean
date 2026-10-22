@@ -220,11 +220,11 @@ export default function MiniERP() {
           <div className="space-y-4">
             <div>
               <label className="text-xs font-bold text-slate-700 block mb-1.5 uppercase tracking-wider">Username</label>
-              <input type="text" required value={loginForm.username} onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })} className="w-full border border-slate-300 px-3.5 py-2.5 rounded-lg text-sm focus:outline-blue-600 bg-slate-50" placeholder="admin / sales / warehouse" />
+              <input type="text" required value={loginForm.username} onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })} className="w-full border border-slate-300 px-3.5 py-2.5 rounded-lg text-sm text-slate-900 focus:outline-blue-600 bg-slate-50" placeholder="admin / sales / warehouse" />
             </div>
             <div>
               <label className="text-xs font-bold text-slate-700 block mb-1.5 uppercase tracking-wider">Password</label>
-              <input type="password" required value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} className="w-full border border-slate-300 px-3.5 py-2.5 rounded-lg text-sm focus:outline-blue-600 bg-slate-50" placeholder="1234" />
+              <input type="password" required value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} className="w-full border border-slate-300 px-3.5 py-2.5 rounded-lg text-sm text-slate-900 focus:outline-blue-600 bg-slate-50" placeholder="1234" />
             </div>
           </div>
           <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition shadow-md">Sign In</button>
